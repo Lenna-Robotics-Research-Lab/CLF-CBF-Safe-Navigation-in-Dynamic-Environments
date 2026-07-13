@@ -80,14 +80,13 @@
 
 
   <actor name="person1">
-
-    <pose>2 2 1.0 0 0 0</pose>
+    <pose>2 2 0.25 0 0 0</pose>
 
     <skin>
       <filename>
         file://media/models/walk.dae
       </filename>
-      <scale>1.0</scale>
+      <scale>0.85</scale>
     </skin>
 
     <animation name="walking">
@@ -101,7 +100,6 @@
     </animation>
 
     <script>
-
       <loop>true</loop>
 
       <auto_start>true</auto_start>
@@ -110,33 +108,31 @@
 
         <waypoint>
           <time>0</time>
-          <pose>2 2 1.0 0 0 3.925</pose>
+          <pose>2 2 0.25 0 0 3.925</pose>
         </waypoint>
 
         <waypoint>
-          <time>7</time>
-          <pose>-2 -2 1.0 0 0 3.925</pose>
+          <time>20</time>
+          <pose>-2 -2 0.25 0 0 3.925</pose>
         </waypoint>
 
         <waypoint>
-          <time>8</time>
-          <pose>-2 -2 1.0 0 0 0.785</pose>
+          <time>23</time>
+          <pose>-2 -2 0.25 0 0 0.785</pose>
         </waypoint>
 
         <waypoint>
-          <time>15</time>
-          <pose>2 2 1.0 0 0 0.785</pose>
+          <time>43</time>
+          <pose>2 2 0.25 0 0 0.785</pose>
         </waypoint>
 
         <waypoint>
-          <time>16</time>
-          <pose>2 2 1.0 0 0 3.925</pose>
+          <time>46</time>
+          <pose>2 2 0.25 0 0 3.925</pose>
         </waypoint>
 
       </trajectory>
-
     </script>
-
   </actor>
 
   </world>
