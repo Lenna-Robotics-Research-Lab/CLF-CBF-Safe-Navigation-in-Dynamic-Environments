@@ -266,7 +266,7 @@ class RefGvnLiteCore:
         # p_scal = 1
 
         # Adaptive reference governor dynamics
-        k = 0.1 * p_scal / (1 + distance_to_ref ** 10)
+        k = 0.2 * p_scal / (1 + distance_to_ref ** 10)
 
         gvn_projection_range_limit = 0.5
 
