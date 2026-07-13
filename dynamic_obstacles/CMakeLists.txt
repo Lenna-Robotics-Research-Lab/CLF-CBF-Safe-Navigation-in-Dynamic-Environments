@@ -13,5 +13,6 @@ catkin_package()
 catkin_install_python(
   PROGRAMS
     scripts/move_cylinder.py
+    scripts/actor_collision_model.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
