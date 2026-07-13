@@ -1,7 +1,0 @@
-image: map_ee_full_cropped.pgm
-resolution: 0.025000
-origin: [-50.012497, -50.012497, 0.000000]
-negate: 0
-occupied_thresh: 0.65
-free_thresh: 0.196
-
