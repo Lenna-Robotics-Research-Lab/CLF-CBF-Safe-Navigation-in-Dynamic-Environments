@@ -2,7 +2,7 @@
 <package format="2">
   <name>erl_clf_cbf_controller</name>
   <version>0.0.0</version>
-  <description>The clf_cbf_controller package for kinematic model of Jackal</description>
+  <description>The base-line CLF-CBF-QP controller package for the kinematic model of Lenna Mobile Robot.</description>
 
   <maintainer email="yiyi@ucsd.edu">hw</maintainer>
   <license>BSD</license>

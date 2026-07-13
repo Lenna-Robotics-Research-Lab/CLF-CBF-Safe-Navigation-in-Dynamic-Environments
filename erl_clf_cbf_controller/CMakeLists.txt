@@ -13,13 +13,9 @@ add_message_files(
   ClfCbfResult.msg
 )
 
-
-
-
 ###########
 ## Build ##
 ###########
-
 
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations

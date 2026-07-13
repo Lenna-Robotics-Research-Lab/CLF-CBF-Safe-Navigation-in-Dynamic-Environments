@@ -1,13 +1,49 @@
-#!/usr/bin/env python
-"""Low level velocity conttoller for unicycle-like robot.
+#!/usr/bin/env python3
+"""
+CLF-CBF Controller Wrapper for Unicycle Mobile Robots.
 
-Interfaces:
-    Input:
-            desired robot states (z*) from ref_gvn node z* = zg
-            current robot states (z) from odometry
-    Output:
-            velocity command for mobile platform or simulated dynamics
+Description
+-----------
+This node implements the low-level control interface between robot state
+estimation, reference generation, obstacle information, and an external
+CLF-CBF optimization backend.
 
+Mathematical Inputs
+-------------------
+- Robot state z = [x, y, theta]^T from odometry/localization.
+- Desired state z* (local goal/reference governor output).
+- Control Barrier Function (CBF) values and gradients obtained from either:
+  * Signed Distance Field (SDF) queries, or
+  * LiDAR / obstacle point cloud processing.
+- Optional moving obstacle states.
+
+Mathematical Outputs
+--------------------
+- Linear velocity command v.
+- Angular velocity command w.
+- Safety metrics including minimum CBF/SDF value and gradient.
+
+ROS Interfaces
+--------------
+Subscribers:
+- clf_cbf/result (erl_clf_cbf_controller/ClfCbfResult)
+- Additional subscribers are instantiated inside ClfCbfPreprocess.
+
+Publishers:
+- clf_cbf/request (erl_clf_cbf_controller/ClfCbfRequest)
+- Additional publishers are instantiated inside ClfCbfPostprocess and
+  ClfCbfPreprocess.
+
+Services:
+- Optional SDF service client used for obstacle-distance evaluation.
+
+Control Flow
+------------
+1. Receive robot state and desired state.
+2. Compute obstacle-distance information and CBF quantities.
+3. Formulate and send a CLF-CBF optimization request.
+4. Receive optimal control solution.
+5. Publish safe velocity commands.
 """
 
 from __future__ import print_function
@@ -26,9 +62,7 @@ import json
 # from erl_clf_cbf_controller.clf_cbf_controller import ClfCbfController
 # from erl_clf_cbf_controller.clf_only_controller import ClfQPController
 
-
 # from erl_clf_cbf_controller.clf_cbf_socp_controller_gp_map import ClfCbfSOCP_GP_MAP
-
 # from erl_clf_cbf_controller.clf_cbf_drccp_dynamic_controller import ClfCbfDrccp_dynamic_Controller
 
 import csv
@@ -37,8 +71,17 @@ import os
 
 def off_wheel_map(rbt_pose, off_wheel_length):
     """
-    Remap robot pose from center of mass to off-wheel point
+    Map the robot pose from the center of mass to the off-wheel control point.
 
+    Inputs:
+        rbt_pose (np.ndarray): [x, y, theta].
+        off_wheel_length (float): Offset distance from robot center.
+
+    Outputs:
+        np.ndarray: [x_off, y_off, theta].
+
+    ROS:
+        No publishers/subscribers.
     """
     off_wheel_x = rbt_pose[0] + off_wheel_length * np.cos(rbt_pose[2])
     off_wheel_y = rbt_pose[1] + off_wheel_length * np.sin(rbt_pose[2])
@@ -52,7 +95,7 @@ class ClfCbfControllerWrapper:
     CLF-CBF-QP controller wrapper, check system status
     """
 
-    # Running status table, higher number better status
+    # status table
     NORMAL = 0
     GOAL_REACHED = 1
 
@@ -73,25 +116,24 @@ class ClfCbfControllerWrapper:
         # loading external config parameters
         self._config_dict = config_table
 
-        self.controller_type = rospy.get_param("~controller_type", "baseline_clf_cbf_qp")  # Default to 'drccp' if not set
+        self.controller_type = rospy.get_param("~controller_type", "baseline_clf_cbf_qp")
         self.load_controller_config()
 
         # system status
         self.status = ClfCbfControllerWrapper.NORMAL
 
-        # -------------------- Constants -------------------------
+        # -------------------- Constants --------------------
         self.ctrl_limits = self._config_dict["ctrl_limits"]
-
         rospy.logwarn("self.ctrl_limits %s" % self.ctrl_limits)
 
-        # ------------------- Init Modules --------------------
+        # -------------------- Init Modules --------------------
         self.init_preprocessor()
         self.init_postprocessor()
 
-        # ------------------- Cache --------------------
+        # -------------------- Cache --------------------
         self.response_cache = []
 
-        # ----------------- for plotting performance -------------
+        # -------------------- for plotting performance --------------------
 
         self.v_list = []
         self.w_list = []
@@ -101,7 +143,7 @@ class ClfCbfControllerWrapper:
 
         self.robot_pos = []
 
-        # ------------------ for plotting moving obstacles in dynamic env ----------------
+        # -------------------- for plotting moving obstacles in dynamic env --------------------
 
         self.robot_started_moving = False
         self.mov_obs_flag = False
@@ -122,6 +164,18 @@ class ClfCbfControllerWrapper:
         self.latest_result = None
 
     def qp_result_cb(self, msg):
+        """
+        Store the latest optimization result received from clf_cbf/result.
+
+        Input:
+            msg (ClfCbfResult)
+
+        Output:
+            Updates self.latest_result.
+
+        ROS:
+            Subscriber: clf_cbf/result (ClfCbfResult)
+        """
         self.latest_result = msg
 
     def send_qp_request_and_get_result(self, req, timeout=1, rate_hz=100):
@@ -163,9 +217,9 @@ class ClfCbfControllerWrapper:
 
         # Assigning new variables from the selected config
         params = self.config["parameters"]
-        self._wheel_offset = params.get("wheel_offset", 0.08)  # Default to 0.08 if not set
-        self._cbf_rate = params.get("cbf_rate", 0.4)  # Default to 0.4 if not set
-        self.noise_level = params.get("noise_level", 0.01)  # Default to 0.01 if not set
+        self._wheel_offset = params.get("wheel_offset", 0.1)    # Default to 0.08 if not set
+        self._cbf_rate = params.get("cbf_rate", 0.4)            # Default to 0.4 if not set
+        self.noise_level = params.get("noise_level", 0.01)      # Default to 0.01 if not set
 
         # Initialize the controller based on the controller type
         # self.init_core()
@@ -281,7 +335,7 @@ class ClfCbfControllerWrapper:
         z = off_wheel_map(rbt_pose=self.preprocessor._np_z, off_wheel_length=0.15)
         rbt_xy = np.array([[self.preprocessor._np_z[0]], [self.preprocessor._np_z[1]]])
 
-        # obtain local goal on path using simplified reference governorClfCbfControllerWrapper
+        # obtain local goal on path using simplified reference governor
         z_dsr = off_wheel_map(rbt_pose=self.preprocessor._np_z_dsr, off_wheel_length=0.15)
 
         # obtain distance error
@@ -388,7 +442,7 @@ class ClfCbfControllerWrapper:
                     partial_h_partial_t = np.concatenate((partial_h_partial_t_mov, partial_h_partial_t))
 
             # obtain smallest five samples
-            cbf_index = np.argsort((cbf_value - 0.2) * self._cbf_rate + partial_h_partial_t)[0:5]
+            cbf_index = np.argsort((cbf_value - 0.15) * self._cbf_rate + partial_h_partial_t)[0:5]
             sorted_cbf_value = cbf_value[cbf_index]
             sorted_cbf_grad = cbf_grad[:, cbf_index]
             sorted_partial_h_partial_t = partial_h_partial_t[cbf_index]
@@ -400,7 +454,7 @@ class ClfCbfControllerWrapper:
         # Set sdf_val as the min of cbf_value
         sdf_val = cbf_value[min_index]
 
-        #   Set sdf_grad as the corresponding cbf_grad
+        # Set sdf_grad as the corresponding cbf_grad
         sdf_grad = cbf_grad[:, min_index]
 
         # send as ros msg to measure time
@@ -426,47 +480,6 @@ class ClfCbfControllerWrapper:
             v, w = 0.0, 0.0
         elif self.status == ClfCbfControllerWrapper.NORMAL:
             # generate control value
-
-            # if self.controller_type == "baseline_clf_cbf_qp":
-            #     # Example of how you might use the controller
-            #     v, w = self.core.generate_controller(
-            #         rbt_pose=z, gamma_s=z_dsr[0:2], cbf_h_val=sdf_val, cbf_h_grad=sdf_grad
-            #     )
-
-            # elif self.controller_type == "clf_qp_only":
-            #     v, w = self.core.generate_controller(
-            #         rbt_pose=z, gamma_s=z_dsr[0:2], cbf_h_val=sdf_val, cbf_h_grad=sdf_grad
-            #     )
-
-            # elif self.controller_type == "robust_cbf_socp":
-            #     v, w = self.core.generate_controller(
-            #         rbt_pose=z,
-            #         gamma_s=z_dsr[0:2],
-            #         cbf_h_val=sdf_val,
-            #         cbf_h_grad=sdf_grad,
-            #         h_error_bound=np.array([response.var_sdf]),
-            #         grad_h_error_bound=np.array([response.var_gradient_x, response.var_gradient_y]),
-            #     )
-
-            # elif self.controller_type == "gp_cbf_socp":
-            #     v, w = self.core.generate_controller(
-            #         rbt_pose=self.preprocessor._np_z,
-            #         gamma_s=z_dsr[0:2],
-            #         cbf_h_val=sdf_val,
-            #         cbf_h_grad=sdf_grad,
-            #         cbf_h_variance=np.array([response.var_sdf]),
-            #         cbf_h_grad_var=np.array([response.var_gradient_x, response.var_gradient_y]),
-            #     )
-
-            # elif self.controller_type == "drccp":
-            #     # Example for DRCCP controller
-            #     v, w = self.core.generate_controller(
-            #         rbt_pose=z,
-            #         gamma_s=z_dsr[0:2],
-            #         h_samples=sorted_cbf_value,
-            #         h_grad_samples=sorted_cbf_grad,
-            #         dh_dt_samples=sorted_partial_h_partial_t,
-            #     )
             if self.controller_type == "baseline_clf_cbf_qp":
                 req = ClfCbfRequest()
                 req.x = z[0]
@@ -566,9 +579,9 @@ class ClfCbfControllerWrapper:
             self.v_list.append(v)
             self.w_list.append(w)
             if self.preprocessor.use_sdf:
-                self.distance_list.append(sdf_val[0] - 0.2)
+                self.distance_list.append(sdf_val[0] - 0.15)
             else:
-                self.distance_list.append(np.min(sorted_cbf_value) - 0.2)
+                self.distance_list.append(np.min(sorted_cbf_value) - 0.15)
             self.error_to_gamma.append(dist_err)
             self.robot_pos.append(rbt_xy)
 
